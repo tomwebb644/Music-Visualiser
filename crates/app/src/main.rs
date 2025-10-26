@@ -21,7 +21,7 @@ fn run_live(preset: Option<&str>) -> music_visualiser_core::Result<()> {
     let audio = AudioEngine::new(AudioMode::Live);
     let analysis = audio.start()?;
     let mut scheduler = Scheduler::new();
-    let mappings = MappingMatrix::new();
+    let mut mappings = MappingMatrix::new();
     let mut render = RenderGraph::new();
 
     let frame = analysis.sample_at(0.0);

@@ -10,20 +10,31 @@ pub enum AudioMode {
 }
 
 /// High level audio engine façade.
-#[derive(Debug)]
+#[derive(Debug, Clone, Copy)]
 pub struct AudioEngine {
     mode: AudioMode,
+    sample_rate: u32,
 }
 
 impl AudioEngine {
     /// Creates a new audio engine instance in the requested mode.
     pub fn new(mode: AudioMode) -> Self {
-        Self { mode }
+        Self::with_sample_rate(mode, 48_000)
+    }
+
+    /// Creates a new audio engine instance using an explicit sample rate.
+    pub fn with_sample_rate(mode: AudioMode, sample_rate: u32) -> Self {
+        Self { mode, sample_rate }
     }
 
     /// Returns the currently configured audio mode.
     pub fn mode(&self) -> AudioMode {
         self.mode
+    }
+
+    /// Returns the sample rate the engine operates at.
+    pub fn sample_rate(&self) -> u32 {
+        self.sample_rate
     }
 
     /// Starts audio processing and returns a handle to the analysis pipeline.
@@ -32,7 +43,10 @@ impl AudioEngine {
     /// returns an [`AnalysisEngine`] that can later be wired to actual audio
     /// capture or file decoding backends.
     pub fn start(&self) -> Result<AnalysisEngine> {
-        Ok(AnalysisEngine::new(self.mode))
+        Ok(AnalysisEngine::with_sample_rate(
+            self.mode,
+            self.sample_rate,
+        ))
     }
 
     /// Feeds a block of floating point samples into the engine. Live capture

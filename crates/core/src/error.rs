@@ -1,3 +1,5 @@
+use realfft::FftError;
+
 /// Result alias that carries the custom [`MusicVizError`] type.
 pub type Result<T> = std::result::Result<T, MusicVizError>;
 
@@ -30,5 +32,11 @@ impl From<&str> for MusicVizError {
 impl From<String> for MusicVizError {
     fn from(value: String) -> Self {
         Self::Message(value)
+    }
+}
+
+impl From<FftError> for MusicVizError {
+    fn from(value: FftError) -> Self {
+        Self::Message(value.to_string())
     }
 }
