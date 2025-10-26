@@ -1,4 +1,4 @@
-use std::f32::consts::TAU;
+use std::{f32::consts::TAU, path::PathBuf};
 
 use clap::{Args, Parser, Subcommand};
 use music_visualiser_core::{
@@ -46,7 +46,7 @@ fn run_live(options: LiveOptions) -> music_visualiser_core::Result<()> {
         ScheduledEvent::new(4.0, "section-b"),
     ]);
     let mut clock = PlaybackClock::default();
-    let mut recorder = Recorder::new(RecordingSettings::default());
+    let mut recorder = Recorder::new(options.recording_settings());
 
     for block_index in 0..options.blocks {
         let samples = synthesise_block(block_index, options.block_size, config.audio.sample_rate);
@@ -63,17 +63,36 @@ fn run_live(options: LiveOptions) -> music_visualiser_core::Result<()> {
             rms = frame.rms,
             centroid = frame.spectral_centroid,
             beat = frame.beat_confidence,
+            bass = frame.low_band_energy,
+            treble = frame.high_band_energy,
+            flux = frame.spectral_flux,
             "processed live block"
         );
         info!(
             intensity = scene.intensity,
             motion = scene.motion,
             beat = scene.beat_emphasis,
+            bass = scene.bass_intensity,
+            treble = scene.treble_intensity,
+            flux = scene.spectral_flux,
             "scene updated"
         );
     }
 
-    info!(frames = recorder.recorded_frames(), "live session complete");
+    let recording_enabled = recorder.settings().enabled;
+    let frames_recorded = recorder.recorded_frames();
+    match recorder.finish()? {
+        Some(path) => info!(
+            frames = frames_recorded,
+            ?path,
+            "live session complete; recording saved"
+        ),
+        None if recording_enabled => info!(
+            frames = frames_recorded,
+            "live session complete; recording retained in memory"
+        ),
+        None => info!(frames = frames_recorded, "live session complete"),
+    }
     Ok(())
 }
 
@@ -122,6 +141,12 @@ struct LiveOptions {
     /// Number of samples in each block.
     #[arg(long, default_value_t = 1024)]
     block_size: usize,
+    /// Enable recording of analysis frames to an in-memory buffer.
+    #[arg(long)]
+    record: bool,
+    /// Optional path where the recorded analysis will be written as JSON.
+    #[arg(long, value_name = "PATH")]
+    record_output: Option<PathBuf>,
 }
 
 #[derive(Args, Debug)]
@@ -129,4 +154,19 @@ struct PrecomputeOptions {
     /// Optional path to the audio file that would be analysed.
     #[arg(value_name = "INPUT", default_value = "")]
     input: String,
+}
+
+impl LiveOptions {
+    fn recording_settings(&self) -> RecordingSettings {
+        let should_record = self.record || self.record_output.is_some();
+        if !should_record {
+            return RecordingSettings::default();
+        }
+
+        let mut settings = RecordingSettings::enabled();
+        if let Some(path) = &self.record_output {
+            settings = settings.with_output_path(path.clone());
+        }
+        settings
+    }
 }

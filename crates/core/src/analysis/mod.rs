@@ -9,6 +9,8 @@ const BEAT_GAIN: f32 = 12.0;
 const BEAT_THRESHOLD: f32 = 0.6;
 const MIN_BEAT_INTERVAL: f32 = 0.2;
 const MAX_BEAT_HISTORY: usize = 32;
+const LOW_BAND_MAX_HZ: f32 = 200.0;
+const HIGH_BAND_MIN_HZ: f32 = 2_000.0;
 
 /// Summary of the analysis metadata accumulated so far.
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
@@ -27,6 +29,13 @@ pub struct AnalysisFrame {
     /// Nyquist frequency of the analysed block.
     pub spectral_centroid: f32,
     pub beat_confidence: f32,
+    /// Relative amount of energy present below [`LOW_BAND_MAX_HZ`].
+    pub low_band_energy: f32,
+    /// Relative amount of energy present above [`HIGH_BAND_MIN_HZ`].
+    pub high_band_energy: f32,
+    /// Normalised spectral flux comparing the current block to the previous
+    /// one.
+    pub spectral_flux: f32,
 }
 
 /// Lightweight DSP façade that focuses on a couple of simple features for the
@@ -43,6 +52,7 @@ pub struct AnalysisEngine {
     beat_timestamps: Vec<f32>,
     fft_planner: RealFftPlanner<f32>,
     fft: Option<FftResources>,
+    previous_magnitudes: Vec<f32>,
 }
 
 impl AnalysisEngine {
@@ -66,6 +76,7 @@ impl AnalysisEngine {
             beat_timestamps: Vec::new(),
             fft_planner: RealFftPlanner::new(),
             fft: None,
+            previous_magnitudes: Vec::new(),
         }
     }
 
@@ -94,6 +105,7 @@ impl AnalysisEngine {
         self.processed_samples = 0;
         self.last_rms = 0.0;
         self.beat_timestamps.clear();
+        self.previous_magnitudes.clear();
     }
 
     /// Consumes audio samples and updates the tracked features.
@@ -118,10 +130,11 @@ impl AnalysisEngine {
 
         let rms = compute_rms(samples);
         let beat_confidence = self.update_beats(timestamp, rms);
-        let centroid_hz = self.compute_spectral_centroid(samples)?;
+        let frequency_features =
+            self.compute_frequency_features(samples, self.processed_samples == 0)?;
         let nyquist = (self.sample_rate as f32).max(1.0) * 0.5;
         let spectral_centroid = if nyquist > 0.0 {
-            (centroid_hz / nyquist).clamp(0.0, 1.0)
+            (frequency_features.centroid_hz / nyquist).clamp(0.0, 1.0)
         } else {
             0.0
         };
@@ -139,6 +152,9 @@ impl AnalysisEngine {
             rms,
             spectral_centroid,
             beat_confidence,
+            low_band_energy: frequency_features.low_band_energy,
+            high_band_energy: frequency_features.high_band_energy,
+            spectral_flux: frequency_features.spectral_flux,
         };
 
         self.frames.push(frame.clone());
@@ -218,7 +234,11 @@ impl AnalysisEngine {
         }
     }
 
-    fn compute_spectral_centroid(&mut self, samples: &[f32]) -> Result<f32> {
+    fn compute_frequency_features(
+        &mut self,
+        samples: &[f32],
+        first_block: bool,
+    ) -> Result<FrequencyFeatures> {
         let len = samples.len();
         let sample_rate = self.sample_rate as f32;
         let fft = self.prepare_fft(len)?;
@@ -232,19 +252,73 @@ impl AnalysisEngine {
 
         let mut magnitude_sum = 0.0;
         let mut weighted_sum = 0.0;
+        let mut low_band_sum = 0.0;
+        let mut high_band_sum = 0.0;
+        let mut magnitudes = Vec::new();
         let bin_hz = sample_rate / len as f32;
+        let epsilon = 1e-6;
 
-        for (i, bin) in fft.spectrum.iter().enumerate() {
-            let magnitude = bin.norm();
-            magnitude_sum += magnitude;
-            weighted_sum += magnitude * (i as f32 * bin_hz);
+        {
+            magnitudes.reserve(fft.spectrum.len());
+            for (i, bin) in fft.spectrum.iter().enumerate() {
+                let magnitude = bin.norm();
+                magnitude_sum += magnitude;
+                weighted_sum += magnitude * (i as f32 * bin_hz);
+                let frequency = i as f32 * bin_hz;
+                if frequency <= LOW_BAND_MAX_HZ {
+                    low_band_sum += magnitude;
+                }
+                if frequency >= HIGH_BAND_MIN_HZ {
+                    high_band_sum += magnitude;
+                }
+                magnitudes.push(magnitude);
+            }
         }
 
-        if magnitude_sum <= f32::EPSILON {
-            Ok(0.0)
+        if self.previous_magnitudes.len() != magnitudes.len() {
+            self.previous_magnitudes.resize(magnitudes.len(), 0.0);
+        }
+
+        let mut flux = 0.0;
+        if !first_block {
+            for (i, magnitude) in magnitudes.iter().enumerate() {
+                let previous = self.previous_magnitudes[i];
+                flux += (magnitude - previous).max(0.0);
+            }
+        }
+
+        for (i, magnitude) in magnitudes.into_iter().enumerate() {
+            self.previous_magnitudes[i] = magnitude;
+        }
+
+        let centroid_hz = if magnitude_sum <= epsilon {
+            0.0
         } else {
-            Ok(weighted_sum / magnitude_sum)
-        }
+            weighted_sum / magnitude_sum
+        };
+
+        let normalise = |value: f32| -> f32 {
+            if magnitude_sum <= epsilon {
+                0.0
+            } else {
+                (value / magnitude_sum).clamp(0.0, 1.0)
+            }
+        };
+
+        let spectral_flux = if first_block {
+            0.0
+        } else if magnitude_sum <= epsilon {
+            0.0
+        } else {
+            (flux / magnitude_sum).clamp(0.0, 1.0)
+        };
+
+        Ok(FrequencyFeatures {
+            centroid_hz,
+            low_band_energy: normalise(low_band_sum),
+            high_band_energy: normalise(high_band_sum),
+            spectral_flux,
+        })
     }
 
     fn prepare_fft(&mut self, size: usize) -> Result<&mut FftResources> {
@@ -280,6 +354,13 @@ struct FftResources {
     input: Vec<f32>,
 }
 
+struct FrequencyFeatures {
+    centroid_hz: f32,
+    low_band_energy: f32,
+    high_band_energy: f32,
+    spectral_flux: f32,
+}
+
 impl fmt::Debug for AnalysisEngine {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("AnalysisEngine")
@@ -290,6 +371,7 @@ impl fmt::Debug for AnalysisEngine {
             .field("processed_samples", &self.processed_samples)
             .field("last_rms", &self.last_rms)
             .field("beat_timestamps", &self.beat_timestamps.len())
+            .field("previous_magnitudes", &self.previous_magnitudes.len())
             .finish()
     }
 }
@@ -332,6 +414,9 @@ mod tests {
         assert!((frame.rms - 0.0).abs() <= f32::EPSILON);
         assert_eq!(frame.beat_confidence, 0.0);
         assert_eq!(frame.spectral_centroid, 0.0);
+        assert_eq!(frame.low_band_energy, 0.0);
+        assert_eq!(frame.high_band_energy, 0.0);
+        assert_eq!(frame.spectral_flux, 0.0);
     }
 
     #[test]
@@ -360,5 +445,37 @@ mod tests {
 
         let frame = engine.sample_at(1.5);
         assert!(frame.time <= 1.5);
+    }
+
+    #[test]
+    fn low_and_high_band_energy_are_distinct() {
+        let mut engine = build_engine(48_000);
+        let low = sine_wave(120.0, 48_000, 1024);
+        let frame_low = engine.process_block(&low).unwrap();
+        assert!(frame_low.low_band_energy > frame_low.high_band_energy);
+
+        engine.reset();
+        let high = sine_wave(5_000.0, 48_000, 1024);
+        let frame_high = engine.process_block(&high).unwrap();
+        assert!(frame_high.high_band_energy > frame_high.low_band_energy);
+    }
+
+    #[test]
+    fn spectral_flux_highlights_spectral_changes() {
+        let mut engine = build_engine(48_000);
+        let low = sine_wave(220.0, 48_000, 1024);
+        engine.process_block(&low).unwrap();
+        let high = sine_wave(3_000.0, 48_000, 1024);
+        let frame = engine.process_block(&high).unwrap();
+        assert!(frame.spectral_flux > 0.0);
+    }
+
+    fn sine_wave(frequency: f32, sample_rate: u32, len: usize) -> Vec<f32> {
+        let mut output = Vec::with_capacity(len);
+        for i in 0..len {
+            let t = i as f32 / sample_rate as f32;
+            output.push((t * frequency * 2.0 * PI).sin());
+        }
+        output
     }
 }

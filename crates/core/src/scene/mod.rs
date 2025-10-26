@@ -39,6 +39,9 @@ pub struct SceneInstance {
     pub intensity: f32,
     pub motion: f32,
     pub beat_emphasis: f32,
+    pub bass_intensity: f32,
+    pub treble_intensity: f32,
+    pub spectral_flux: f32,
 }
 
 impl SceneInstance {
@@ -48,6 +51,9 @@ impl SceneInstance {
             intensity: 0.0,
             motion: 0.0,
             beat_emphasis: 0.0,
+            bass_intensity: 0.0,
+            treble_intensity: 0.0,
+            spectral_flux: 0.0,
         }
     }
 
@@ -57,6 +63,9 @@ impl SceneInstance {
                 "intensity" => self.intensity = update.value,
                 "motion" => self.motion = update.value,
                 "beat" => self.beat_emphasis = update.value,
+                "bass" => self.bass_intensity = update.value,
+                "treble" => self.treble_intensity = update.value,
+                "flux" => self.spectral_flux = update.value,
                 _ => {}
             }
         }

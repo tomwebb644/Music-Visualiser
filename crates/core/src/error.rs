@@ -32,3 +32,15 @@ impl From<realfft::FftError> for MusicVizError {
         Self::Message(err.to_string())
     }
 }
+
+impl From<std::io::Error> for MusicVizError {
+    fn from(err: std::io::Error) -> Self {
+        Self::Message(err.to_string())
+    }
+}
+
+impl From<serde_json::Error> for MusicVizError {
+    fn from(err: serde_json::Error) -> Self {
+        Self::Message(err.to_string())
+    }
+}
