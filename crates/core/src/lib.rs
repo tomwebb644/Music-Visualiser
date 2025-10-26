@@ -19,7 +19,7 @@ pub mod timeline;
 
 pub use analysis::{AnalysisEngine, AnalysisFrame, AnalysisSummary};
 pub use assets::{AssetStore, StlAsset};
-pub use audio::{AudioEngine, AudioMode};
+pub use audio::{AnalysisHandle, AudioEngine, AudioMode};
 pub use config::{AppConfig, AudioConfig};
 pub use error::{MusicVizError, Result};
 pub use mapping::{MappingDescriptor, MappingMatrix, ParameterUpdate};

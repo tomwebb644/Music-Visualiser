@@ -1,7 +1,9 @@
 use std::path::PathBuf;
 
 use clap::{Parser, Subcommand};
-use music_visualiser_core::{AudioEngine, AudioMode, MappingMatrix, RenderGraph, Scheduler};
+use music_visualiser_core::{
+    AudioEngine, AudioMode, MappingMatrix, RenderGraph, SceneDescriptor, SceneInstance, Scheduler,
+};
 use tracing_subscriber::EnvFilter;
 
 fn main() -> music_visualiser_core::Result<()> {
@@ -23,9 +25,13 @@ fn run_live(preset: Option<&str>) -> music_visualiser_core::Result<()> {
     let mut scheduler = Scheduler::new();
     let mut mappings = MappingMatrix::new();
     let mut render = RenderGraph::new();
+    render.register_scene(SceneInstance::new(SceneDescriptor::Kaleidoscope {
+        order: 6,
+    }));
 
-    let frame = analysis.sample_at(0.0);
+    let frame = analysis.sample_at(0.0)?;
     let _ = scheduler.tick(0.0, &frame);
+    render.ingest_analysis_frame(frame.clone());
     let updates = mappings.evaluate(&frame);
     render.apply_updates(updates);
     render.draw()
