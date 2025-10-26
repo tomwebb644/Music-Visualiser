@@ -76,6 +76,18 @@ impl AnalysisEngine {
         self.sample_rate
     }
 
+    /// Resets the accumulated analysis state while preserving configuration.
+    pub fn reset(&mut self) {
+        self.summary = AnalysisSummary {
+            sample_rate: self.sample_rate,
+            ..Default::default()
+        };
+        self.frames.clear();
+        self.processed_samples = 0;
+        self.last_rms = 0.0;
+        self.beat_timestamps.clear();
+    }
+
     /// Consumes audio frames and updates internal feature buffers.
     pub fn process_block(&mut self, samples: &[f32]) -> Result<()> {
         if samples.is_empty() {
