@@ -48,6 +48,18 @@ impl MappingMatrix {
             target: "beat".to_string(),
             value: frame.beat_confidence,
         });
+        self.push(ParameterUpdate {
+            target: "bass".to_string(),
+            value: frame.low_band_energy,
+        });
+        self.push(ParameterUpdate {
+            target: "treble".to_string(),
+            value: frame.high_band_energy,
+        });
+        self.push(ParameterUpdate {
+            target: "flux".to_string(),
+            value: frame.spectral_flux,
+        });
     }
 }
 
